@@ -1,0 +1,17 @@
+# 构建产物与本地状态
+local/data/
+local/dist/
+local/build/
+local/web/
+local/*.spec
+local/__pycache__/
+*.pyc
+__pycache__/
+test_sample.txt
+.DS_Store
+
+# 发布过程临时文件（含敏感信息）
+build/MinGit.zip
+build/device_code.json
+build/gh_token.txt
+build/poll_device.py
