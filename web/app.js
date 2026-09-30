@@ -10,6 +10,8 @@ const state = {
   filter: "personal", search: "",
   selected: null,
   relation: "romance",
+  mode: "analysis",          // analysis | coach
+  tone: "natural",
   start: "", end: "",
   analysis: null,
   ai: null,
@@ -41,7 +43,7 @@ async function api(path, opts) {
 }
 
 function show(name) {
-  for (const s of ["home", "select", "result"]) {
+  for (const s of ["home", "select", "result", "coach"]) {
     $("#screen-" + s).classList.toggle("hidden", s !== name);
   }
   window.scrollTo({ top: 0 });
@@ -215,7 +217,9 @@ function bindHome() {
     ev.target.value = "";
   };
 
-  $("#btnGotoSelect").onclick = () => { state.selected = null; show("select"); enterSelect(); };
+  $("#btnGotoSelect").onclick = () => { state.selected = null; state.mode = "analysis"; show("select"); enterSelect(); };
+  $("#featAnalysis").onclick = () => { state.selected = null; state.mode = "analysis"; show("select"); enterSelect(); };
+  $("#featCoach").onclick = () => { state.selected = null; state.mode = "coach"; show("select"); enterSelect(); };
   $("#btnOpenSettings").onclick = openSettings;
 }
 
@@ -276,6 +280,11 @@ function bindSettings() {
 async function enterSelect() {
   $("#searchInput").value = "";
   $("#chatList").innerHTML = '<div style="color:var(--muted);font-size:13.5px">加载中…</div>';
+  // 按模式切换底部动作按钮
+  const isCoach = state.mode === "coach";
+  $("#btnAnalyze").style.display = isCoach ? "none" : "";
+  $("#btnCoachGo").style.display = isCoach ? "" : "none";
+  $("#screen-select .hero h1").textContent = isCoach ? "选择聊天对象（对话军师）" : "选择聊天对象与时间段";
   if (state.localMode) {
     try {
       const [s, c] = await Promise.all([api("/api/sessions?limit=800"), api("/api/contacts?limit=6000")]);
@@ -709,11 +718,149 @@ async function runAiDeep() {
   }
 }
 
+// ---------------- 对话军师 ----------------
+const COACH_TONE_COLORS = { natural: "#8FB383", humor: "#D9B25F", warm: "#E39D92", short: "#8FA8C9" };
+
+async function coachEnter() {
+  if (!state.selected) return toast("请先选择一个聊天对象");
+  show("coach");
+  $("#coachSub").textContent = `对象：${state.selected.chat}${state.selected.import_id ? "（导入记录）" : ""} · 关系：${RELATION_LABELS[state.relation] || "暧昧/恋爱对象"}`;
+  $("#coachCtx").innerHTML = '<div style="color:var(--muted);font-size:13px">加载中…</div>';
+  $("#coachResult").innerHTML = "";
+  $("#coachInput").value = "";
+  await loadCoachContext();
+}
+
+async function loadCoachContext() {
+  const box = $("#coachCtx");
+  try {
+    let msgs = null;
+    if (state.localMode) {
+      const q = new URLSearchParams({ chat: state.selected.username || state.selected.chat, limit: "80" });
+      const d = await api("/api/history?" + q.toString());
+      msgs = d.messages || [];
+    } else {
+      msgs = (loadSelectedMessages() || []).slice(-80);
+    }
+    state.coachMsgs = msgs;
+    const shown = msgs.slice(-8);
+    if (!shown.length) {
+      box.innerHTML = '<div style="color:var(--muted);font-size:13px">该时间段内还没有聊天记录</div>';
+      $("#coachCtxDesc").textContent = "";
+      return;
+    }
+    box.innerHTML = shown.map(m => `
+      <div class="c-msg ${m.sender === "me" ? "me" : "other"}">
+        <div class="t">${esc(m.time)} · ${m.sender === "me" ? "我" : "对方"}</div>
+        ${esc(m.text.length > 60 ? m.text.slice(0, 60) + "…" : m.text)}
+      </div>`).join("");
+    $("#coachCtxDesc").textContent = `共 ${msgs.length} 条 · 显示最近 ${shown.length} 条`;
+    // 自动填入对方最新一条
+    const lastOther = [...msgs].reverse().find(m => m.sender !== "me");
+    if (lastOther && (lastOther.type === 1 || lastOther.type === 3 || lastOther.type === 34 || lastOther.type === 47)) {
+      const preview = lastOther.text;
+      $("#coachInput").value = preview;
+      toast("已自动填入对方最新消息，可修改后生成回复");
+    } else if (msgs.length) {
+      $("#coachInput").value = "";
+    }
+  } catch (e) {
+    box.innerHTML = `<div style="color:var(--red-deep);font-size:13px">❌ ${esc(e.message)}</div>`;
+  }
+}
+
+async function coachGenerate() {
+  const input = $("#coachInput");
+  const msg = input.value.trim();
+  if (!msg) return toast("请先输入（或读取）对方最新消息");
+  const btn = $("#btnGenReply");
+  btn.disabled = true;
+  btn.textContent = "⏳ 生成中…";
+  try {
+    let result = null;
+    if (state.localMode) {
+      const body = { message: msg, relation: state.relation, tone: state.tone };
+      if (state.selected?.import_id) body.import_id = state.selected.import_id;
+      else body.chat = state.selected?.username || state.selected?.chat;
+      result = await api("/api/reply", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    } else {
+      const cfg = Llm.getConfig();
+      if (!cfg.api_key) throw new Error("尚未配置 AI：请在设置页填写你自己的 OpenAI 兼容 API Key（聊天内容只会发送给你填写的 API）");
+      const msgs = state.coachMsgs && state.coachMsgs.length ? state.coachMsgs : (loadSelectedMessages() || []);
+      const stats = Engine.computeStats(msgs);
+      result = await Llm.replySuggestions(cfg, msgs, stats, state.relation, msg, state.selected?.chat || "", state.tone);
+    }
+    renderReplyBlock(msg, result);
+    input.value = "";
+  } catch (e) {
+    toast(e.message);
+    if (e.message.includes("配置")) openSettings();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "✨ 生成回复方案";
+  }
+}
+
+function renderReplyBlock(theirMsg, result) {
+  const box = $("#coachResult");
+  const time = new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  const block = document.createElement("div");
+  block.className = "reply-block";
+  block.innerHTML = `<div class="rb-head"><span>${esc(time)} · 对方消息：${esc(theirMsg.slice(0, 30))}${theirMsg.length > 30 ? "…" : ""}</span></div>` +
+    (result.options || []).map((o, i) => `
+      <div class="reply-card">
+        <span class="style-tag" style="background:${COACH_TONE_COLORS[state.tone] || "#8FB383"}">${esc(o.style)}</span>
+        <div class="r-text">${esc(o.text)}</div>
+        <button class="copy-btn" data-copy="${esc(o.text)}">复制</button>
+      </div>`).join("") +
+    (result.strategy ? `<div class="reply-note">💡 军师提示：${esc(result.strategy)}</div>` : "");
+  box.prepend(block);
+  block.querySelectorAll(".copy-btn").forEach(btn => {
+    btn.onclick = async () => {
+      const text = btn.dataset.copy;
+      try {
+        await navigator.clipboard.writeText(text);
+        btn.textContent = "✅ 已复制";
+        setTimeout(() => (btn.textContent = "复制"), 1500);
+      } catch (e) {
+        const ta = document.createElement("textarea");
+        ta.value = text; document.body.appendChild(ta); ta.select();
+        document.execCommand("copy"); ta.remove();
+        btn.textContent = "✅ 已复制";
+        setTimeout(() => (btn.textContent = "复制"), 1500);
+      }
+    };
+  });
+}
+
+function bindCoach() {
+  $("#btnCoachGo").onclick = () => {
+    if (!state.selected) return toast("请先选择一个聊天对象");
+    state.relation = $("#relationSel").value;
+    coachEnter();
+  };
+  $("#btnRefreshLatest").onclick = () => {
+    $("#coachInput").value = "";
+    loadCoachContext();
+  };
+  $("#btnCoachPick").onclick = () => { show("select"); enterSelect(); };
+  $("#btnGenReply").onclick = coachGenerate;
+  document.querySelectorAll("#toneChips .filter-chip").forEach(chip => {
+    chip.onclick = () => {
+      state.tone = chip.dataset.tone;
+      document.querySelectorAll("#toneChips .filter-chip").forEach(c => c.classList.toggle("on", c === chip));
+    };
+  });
+}
+
+const RELATION_LABELS = { romance: "暧昧/恋爱对象", friend: "朋友/同学", work: "职场/客户", family: "家人/长辈" };
+
 // ---------------- 启动 ----------------
 function init() {
   bindHome();
   bindSelect();
   bindSettings();
+  bindCoach();
   const today = new Date();
   const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   $("#dateEnd").value = fmt(today);
