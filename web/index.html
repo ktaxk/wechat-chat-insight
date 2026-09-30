@@ -13,8 +13,24 @@
   <div id="screen-home">
     <div class="hero">
       <h1>微信聊天分析站</h1>
-      <p class="sub">选择一位好友和一个时间段，自动分析你们的聊天节奏、关系信号，生成一份可执行的策略决策树——还可以直接向它提问。</p>
+      <p class="sub">两个功能：复盘一段时间的聊天生成策略决策树；对方发来新消息时，生成贴合你说话风格的回复方案。</p>
       <p class="privacy">🔒 所有数据只在你自己的设备上处理：不注册、不收集、不联网上传聊天内容。</p>
+    </div>
+
+    <!-- 双功能入口 -->
+    <div class="feature-grid">
+      <div class="feature-card pink" id="featAnalysis">
+        <div class="f-ico">📊</div>
+        <h3>聊天记录分析</h3>
+        <p>选择一位好友和一段时间，复盘聊天节奏与关系信号，生成策略决策树、信号灯和推进时间轴，可导出报告。</p>
+        <div class="f-cta">开始分析 →</div>
+      </div>
+      <div class="feature-card blue" id="featCoach">
+        <div class="f-ico">💬</div>
+        <h3>实时对话军师</h3>
+        <p>读取最近的聊天记录作上下文，对方发来新消息时，一键生成 3 条贴合你语气和用词的回复方案。</p>
+        <div class="f-cta">开始对话 →</div>
+      </div>
     </div>
 
     <!-- 网页模式横幅（无本地后端时显示） -->
@@ -124,8 +140,46 @@
         </div>
         <div class="btn-row" style="margin-top:20px">
           <button class="btn primary" id="btnAnalyze">✨ 开始分析</button>
+          <button class="btn blue" id="btnCoachGo" style="display:none">进入对话军师 →</button>
           <button class="btn ghost" id="btnBackHome">← 返回</button>
         </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ============ 对话军师 ============ -->
+  <div id="screen-coach" class="hidden">
+    <div class="hero" style="padding:34px 36px 28px">
+      <h1 style="font-size:24px">💬 实时对话军师</h1>
+      <p class="sub" id="coachSub"></p>
+    </div>
+
+    <section>
+      <div class="sec-head"><span class="dot" style="background:var(--blue-deep);box-shadow:0 0 0 5px rgba(143,168,201,.18)"></span>
+        <h2>最近聊天记录（上下文）</h2><span class="desc" id="coachCtxDesc"></span></div>
+      <div class="card">
+        <div class="btn-row">
+          <button class="btn ghost small" id="btnRefreshLatest">🔄 读取对方最新消息</button>
+          <button class="btn ghost small" id="btnCoachPick">↺ 换一个对象</button>
+        </div>
+        <div class="coach-ctx" id="coachCtx"><div style="color:var(--muted);font-size:13px">加载中…</div></div>
+      </div>
+    </section>
+
+    <section>
+      <div class="sec-head"><span class="dot"></span><h2>对方刚发来的消息</h2><span class="desc">生成贴合你说话风格的回复</span></div>
+      <div class="card">
+        <textarea id="coachInput" rows="3" placeholder="粘贴对方最新消息，或点上方「读取对方最新消息」自动获取（本机版）…"></textarea>
+        <div class="btn-row" style="margin-top:14px">
+          <div class="tone-chips" id="toneChips">
+            <span class="filter-chip on" data-tone="natural">自然得体</span>
+            <span class="filter-chip" data-tone="humor">幽默轻松</span>
+            <span class="filter-chip" data-tone="warm">走心真诚</span>
+            <span class="filter-chip" data-tone="short">简洁直接</span>
+          </div>
+          <button class="btn primary" id="btnGenReply">✨ 生成回复方案</button>
+        </div>
+        <div id="coachResult"></div>
       </div>
     </section>
   </div>
