@@ -143,5 +143,40 @@ const Llm = (() => {
     return lines.join("\n");
   }
 
-  return { getConfig, setConfig, clearKey, askQuestion, deepAnalysis, retrieve };
+  // ---------------- 实时回复方案 ----------------
+  const TONE_NAMES = { natural: "自然得体", humor: "幽默轻松", warm: "走心真诚", short: "简洁直接" };
+
+  async function replySuggestions(cfg, messages, stats, relation, newMessage, chatName = "", tone = "natural") {
+    const toneLabel = TONE_NAMES[tone] || TONE_NAMES.natural;
+    const system = (RELATION_ROLE[relation] || RELATION_ROLE.romance) +
+      " 你是实时聊天军师。你会拿到一段真实的聊天记录（me=用户本人，other=对方），以及对方刚刚发来的新消息。" +
+      "请先观察用户本人的语言习惯（用词、口头禅、表情使用、消息长短、语气），然后生成 3 条可以直接发送的回复方案。";
+    const context = bundle(messages.slice(-60), 7000);
+    const user = `聊天对象：${chatName || "未知"}\n关系类型：${relation}\n` +
+      `统计数据：${statsBrief(stats, relation)}\n\n` +
+      `最近的聊天记录（me=用户本人）:\n${context}\n\n` +
+      `对方刚刚发来的新消息：${newMessage}\n\n` +
+      '请输出 JSON（不要任何多余文字）：\n' +
+      '{"options": [{"style": "风格名", "text": "回复内容"}, {"style": "风格名", "text": "回复内容"}, {"style": "风格名", "text": "回复内容"}], "strategy": "一句话策略提示（30字内）"}\n' +
+      `要求：3 条回复风格各不相同，第 1 条以「${toneLabel}」为主；` +
+      "回复长度贴近用户平时消息的长度（不要长篇大论）；模仿用户的语气和常用词，不油腻、不说教；" +
+      "如果对方的消息需要安慰/共情，第 3 条要走心一点。";
+    const text = await chatCompletion(cfg, system, user, 0.8, 900);
+    let t = text.trim();
+    const m = /```(?:json)?\s*(\{[\s\S]*\})\s*```/.exec(t);
+    if (m) t = m[1];
+    let data = null;
+    try { data = JSON.parse(t); } catch (e) {
+      const start = t.indexOf("{"), end = t.lastIndexOf("}");
+      if (start >= 0 && end > start) { try { data = JSON.parse(t.slice(start, end + 1)); } catch (e2) {} }
+    }
+    if (!data || !(data.options || []).some(o => (o.text || "").trim()))
+      throw new Error("AI 未返回可用的回复方案，请重试");
+    return {
+      options: (data.options || []).slice(0, 3).map(o => ({ style: o.style || "方案", text: (o.text || "").trim() })),
+      strategy: data.strategy || "",
+    };
+  }
+
+  return { getConfig, setConfig, clearKey, askQuestion, deepAnalysis, replySuggestions, retrieve };
 })();
