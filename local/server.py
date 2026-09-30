@@ -164,6 +164,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._api_import(body)
             if url.path == "/api/ask":
                 return self._api_ask(body)
+            if url.path == "/api/reply":
+                return self._api_reply(body)
             if url.path == "/api/analyze-ai":
                 return self._api_analyze_ai(body)
             if url.path == "/api/config":
@@ -228,7 +230,11 @@ class Handler(BaseHTTPRequestHandler):
         chat = qs.get("chat", [""])[0]
         if not chat:
             return self._send(*_err("缺少 chat"))
-        data = wx.get_history(chat, qs.get("start", [""])[0] or None, qs.get("end", [""])[0] or None)
+        try:
+            limit = min(int(qs.get("limit", ["100000"])[0]), 100000)
+        except ValueError:
+            limit = 100000
+        data = wx.get_history(chat, qs.get("start", [""])[0] or None, qs.get("end", [""])[0] or None, limit=limit)
         data["ok"] = True
         return self._send(*_json(data))
 
@@ -274,6 +280,23 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(*_err("没有可分析的消息"))
         answer = ai_mod.ask_question(llm, messages, stats, relation, question, _data.get("chat") or "")
         return self._send(*_json({"ok": True, "answer": answer}))
+
+    def _api_reply(self, body):
+        message = (body.get("message") or "").strip()
+        if not message:
+            return self._send(*_err("请先输入对方新发的消息"))
+        llm = _load_llm_cfg()
+        if not llm.get("api_key"):
+            return self._send(*_err("尚未配置 AI：请在设置页填写你自己的 OpenAI 兼容 API Key（聊天内容只会发送给你填写的 API）", 400))
+        _data, messages = _load_messages(body)
+        relation = body.get("relation") or "romance"
+        stats = an.compute_stats(messages)
+        if not stats:
+            return self._send(*_err("没有可分析的消息"))
+        result = ai_mod.reply_suggestions(
+            llm, messages, stats, relation, message,
+            _data.get("chat") or "", body.get("tone") or "natural")
+        return self._send(*_json({"ok": True, **result}))
 
     def _api_analyze_ai(self, body):
         llm = _load_llm_cfg()
