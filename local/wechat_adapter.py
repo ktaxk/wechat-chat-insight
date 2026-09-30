@@ -334,7 +334,7 @@ def get_history(chat, start=None, end=None, limit=100000):
         "chat": ctx["display_name"],
         "username": ctx["username"],
         "is_group": ctx["is_group"],
-        "messages": collected[:limit],
+        "messages": collected[-limit:],
     }
 
 
