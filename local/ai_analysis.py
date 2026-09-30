@@ -179,3 +179,59 @@ def _bundle(messages, max_chars):
         lines.append(line)
         used += len(line) + 1
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------- 实时回复方案
+
+_TONE_NAMES = {"natural": "自然得体", "humor": "幽默轻松", "warm": "走心真诚", "short": "简洁直接"}
+
+
+def reply_suggestions(cfg, messages, stats, relation, new_message, chat_name="", tone="natural"):
+    """根据最近聊天记录 + 对方新发的消息，生成 3 条不同风格的回复方案。
+
+    返回 {"options": [{"style":..., "text":...}, ...], "strategy": "一句话策略"}。
+    """
+    tone_label = _TONE_NAMES.get(tone, _TONE_NAMES["natural"])
+    system = (
+        RELATION_ROLE.get(relation, RELATION_ROLE["romance"])
+        + " 你是实时聊天军师。你会拿到一段真实的聊天记录（me=用户本人，other=对方），"
+        + "以及对方刚刚发来的新消息。请先观察用户本人的语言习惯（用词、口头禅、表情使用、消息长短、语气），"
+        + "然后生成 3 条可以直接发送的回复方案。"
+    )
+    # 取最近 60 条作为上下文
+    context = _bundle(messages[-60:], 7000)
+    user = (
+        f"聊天对象：{chat_name or '未知'}\n关系类型：{relation}\n"
+        f"统计数据：{stats_brief(stats, relation)}\n\n"
+        f"最近的聊天记录（me=用户本人）:\n{context}\n\n"
+        f"对方刚刚发来的新消息：{new_message}\n\n"
+        f'请输出 JSON（不要任何多余文字）：\n'
+        f'{{"options": [{{"style": "风格名", "text": "回复内容"}}, {{"style": "风格名", "text": "回复内容"}}, '
+        f'{{"style": "风格名", "text": "回复内容"}}], "strategy": "一句话策略提示（30字内）"}}\n'
+        f"要求：3 条回复风格各不相同，第 1 条以「{tone_label}」为主；"
+        f"回复长度贴近用户平时消息的长度（不要长篇大论）；模仿用户的语气和常用词，不油腻、不说教；"
+        f"如果对方的消息需要安慰/共情，第 3 条要走心一点。"
+    )
+    text = chat_completion(cfg, system, user, temperature=0.8, max_tokens=900)
+    text = text.strip()
+    m = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.S)
+    if m:
+        text = m.group(1)
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        start, end = text.find("{"), text.rfind("}")
+        if start >= 0 and end > start:
+            try:
+                data = json.loads(text[start:end + 1])
+            except json.JSONDecodeError:
+                data = None
+        if data is None:
+            raise RuntimeError("AI 输出无法解析为 JSON，请重试")
+    options = data.get("options") or []
+    if not options or not any((o.get("text") or "").strip() for o in options):
+        raise RuntimeError("AI 未返回可用的回复方案，请重试")
+    return {
+        "options": [{"style": o.get("style") or "方案", "text": (o.get("text") or "").strip()} for o in options[:3]],
+        "strategy": data.get("strategy") or "",
+    }
